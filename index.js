@@ -1,5 +1,5 @@
 // const path = require('path')
-// const fs = require('fs')
+const fs = require('fs')
 
 module.exports = function AlexPacketIdFinder(mod) {
     const command = mod.command
@@ -13,14 +13,43 @@ module.exports = function AlexPacketIdFinder(mod) {
 	let packetId = null
 	let showCandidateJson = true
 	let rawHook = null
+	let logFile = null
+	let jsonFile = null
+
+	function jsonRequire(data) {
+		try {
+			delete require.cache[require.resolve('./'+data)]
+			return require('./'+data);
+		} catch (e) {
+			command.message(`Error loading file ${data}: ${e.message.split('Require stack:')[0]}`)
+		}
+	}
+	
+	function timestamp() {
+		let today = new Date();
+		return "[" + today.getHours() + ":" + today.getMinutes() + ":" + today.getSeconds() + ":" + today.getMilliseconds() + "]";
+	}
+
+	function enableLog() {
+		logFile = fs.createWriteStream('fpi-log.log', { flags: 'a'	})
+		logFile.write('<---- FPI ENABLED ---->\r\n')
+		logFile.write(`<---- Filter: ${packetId !== null ? 'only id ' + packetId : 'any id'}, regex /${filterExpression}/i ---->\r\n`)
+		logFile.write(`<---- Filtered defs (${filteredPacketDefList.length}): ${filteredPacketDefList.join(', ')} ---->\r\n`)
+	}
+
+	function disableLog() {
+		logFile.end('<---- FPI DISABLED ---->\r\n')
+	}
 
 	function printMainStatus()
 	{
 		if (enabled) {
 			command.message(`Packet id finder is now enabled (${packetId !== null ? 'only id ' + packetId : 'any id'}, regex /${filterExpression}/i).`)
-			command.message(`Filtered defs count: ${filteredPacketDefList.length}`)
+			command.message(`Filtered defs (${filteredPacketDefList.length}): ${filteredPacketDefList.join(', ')}`)
+			enableLog()
 		} else {
 			command.message(`Packet id finder is now disabled.`)
+			disableLog()
 		}
 	}
 	
@@ -50,6 +79,11 @@ module.exports = function AlexPacketIdFinder(mod) {
 			rebuildFilteredPacketDefList()
 			
 			printMainStatus()
+		} else if (arg1.toLowerCase() === 'file') {
+			if (arg2 != undefined) {
+				jsonFile = jsonRequire(arg2);
+				if(jsonFile) command.exec(`fpi ${jsonFile.join('|')}`)
+			}
 		} else {
 			if (arg1.toLowerCase() === 'json') {
 				showCandidateJson = !showCandidateJson
@@ -150,13 +184,16 @@ module.exports = function AlexPacketIdFinder(mod) {
 		if (mod.dispatch.protocolMap.code.get(code) && filterKnownPackets) return;
 		let candidates = findPacketIds(code, data, incoming, fake)
 		if (!candidates.length) return;
+		logFile.write(`${timestamp()} Candidates for id ${code}: [${candidates.join(', ')}].\r\n`);
 		console.log(`Candidates for id ${code}: [${candidates.join(', ')}].`)
 		command.message(`Candidates for id ${code}: [${candidates.join(', ')}].`)
 		if(showCandidateJson) candidates.forEach(candidate => {
 			let packet = mod.dispatch.fromRaw(candidate, '*', data)
+			logFile.write(`${code} as ${candidate}:\r\n`)
 			console.log(`${code} as ${candidate}:`)
 			// loopBigIntToString(packet)
 			let json = JSON.stringify(packet, (key, value) => typeof value === 'bigint' ? `${value}` : value, 4)
+			logFile.write(`${json}\r\n`)
 			console.log(json)
 			command.message(json)
 		})
